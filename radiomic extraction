@@ -1,0 +1,1907 @@
+
+
+# <editor-fold desc="Image Acquisition Parameters">
+
+# <editor-fold desc="Import Libraries">
+import os
+import pandas as pd
+import pydicom
+from pathlib import Path
+# </editor-fold>
+
+# <editor-fold desc="Utility Functions">
+def rec_listdir(path):
+    files = []
+    for r, d, f in os.walk(path):
+        for f_i in f:
+            files.append(os.path.join(r, f_i))
+    return files
+
+def make_newdir(dir_path):
+    if not os.path.exists(dir_path):
+        os.mkdir(dir_path)
+# </editor-fold>
+
+# <editor-fold desc="Function to extract img params">
+def get_value(x):
+    if hasattr(x, 'value'):
+        return x.value
+    else:
+        return 'NA'
+
+def extract_acq_params(img_subdir=None, dcm_s1_file=None):
+    if dcm_s1_file is None:
+        dcm_s1_file = rec_listdir(img_subdir)[0]
+
+    dcm_s1 = pydicom.dcmread(dcm_s1_file, stop_before_pixels=True)
+    study_date = get_value(dcm_s1.get([0x0008, 0x0020], "NA"))
+    scanner_manufacturer = get_value(dcm_s1.get([0x0008, 0x0070], "NA"))
+    scanner_model = get_value(dcm_s1.get([0x0008, 0x1090], "NA"))
+    voxel_dim = get_value(dcm_s1.get([0x0028, 0x0030], "NA"))
+    slice_thickness = get_value(dcm_s1.get([0x0018, 0x0050], "NA"))
+    kvp = get_value(dcm_s1.get([0x0018, 0x0060], "NA"))
+    kernel = get_value(dcm_s1.get([0x0018, 0x1210], "NA"))
+    xr_current = get_value(dcm_s1.get([0x0018, 0x1151], "NA"))
+    exposure_time = get_value(dcm_s1.get([0x0018, 0x1150], "NA"))
+    exposure = get_value(dcm_s1.get([0x0018, 0x1152], "NA"))
+    reconstruction_diameter = get_value(dcm_s1.get([0x0018, 0x1100], "NA"))
+    contrast_administration = get_value(dcm_s1.get([0x0018, 0x0010], "NA"))
+    acq_params = pd.DataFrame({
+        'acq_scanner_manufacturer': [scanner_manufacturer],
+        'acq_scanner_model': [scanner_model],
+        'acq_voxel_dim': [voxel_dim[0]],
+        'acq_slice_thickness': [slice_thickness],
+        'acq_kvp': [kvp],
+        'acq_kernel': [kernel],
+        'acq_xr_current': [xr_current],
+        'acq_exposure_time': [exposure_time],
+        'acq_exposure': [exposure],
+        'acq_reconstruction_diameter': [reconstruction_diameter],
+        'acq_contrast_administration': [contrast_administration],
+        'acq_study_date': [study_date]
+    })
+
+    return acq_params
+
+# </editor-fold>
+
+# <editor-fold desc="extract acq params">
+img_dir = 'H:\ALIAS_img'
+img_files = rec_listdir(img_dir)
+img_subdirs = [os.path.dirname(i) for i in img_files]
+img_ids = [i.split(sep="\\")[3] for i in img_files]
+img_df = pd.DataFrame(tuple(i.split("_")) for i in img_ids)
+img_df.rename(columns={0: 'patient_id', 1: 'scan'}, inplace=True)
+img_df['img_file'] = img_files
+img_df['img_subdir'] = img_subdirs
+img_df = img_df.loc[~img_df.img_subdir.duplicated(), :].reset_index()
+dataset_name = 'alias'
+acq_params_output_dir = 'acq_params_25_04_23'
+make_newdir(acq_params_output_dir)
+
+acq_params_df = []
+for obs_i in range(len(img_df)):
+    print('alias params', obs_i)
+
+    patient_id = img_df.patient_id[obs_i]
+    scan = img_df.scan[obs_i]
+    img_subdir = img_df.img_subdir[obs_i]
+    acq_params_i = extract_acq_params(img_subdir)
+    acq_params_i['patient_id'] = patient_id
+    acq_params_i['scan'] = scan
+    acq_params_df.append(acq_params_i)
+
+acq_params_df = pd.concat(acq_params_df, axis=0)
+acq_params_df['dataset'] = dataset_name
+acq_params_df_path = acq_params_output_dir + r'/' + dataset_name + r'.csv'
+acq_params_df.to_csv(acq_params_df_path)
+# </editor-fold>
+
+# </editor-fold>
+
+# <editor-fold desc="Saving Images and Windows">
+
+# <editor-fold desc="Import libraries">
+import os
+import pandas as pd
+import numpy as np
+import rt_utils
+import pydicom
+import random
+import matplotlib.pyplot as plt
+# </editor-fold>
+
+# <editor-fold desc="Utility functions">
+def rec_listdir(path):
+    files = []
+    for r, d, f in os.walk(path):
+        for f_i in f:
+            files.append(os.path.join(r, f_i))
+    return files
+
+
+def get_value(x):
+    if hasattr(x, 'value'):
+        return x.value
+    else:
+        return 'NA'
+
+def extract_acq_params(dcm_s1_file):
+
+    dcm_s1 = pydicom.dcmread(dcm_s1_file, stop_before_pixels=True)
+    study_date = get_value(dcm_s1.get([0x0008, 0x0020], "NA"))
+    scanner_manufacturer = get_value(dcm_s1.get([0x0008, 0x0070], "NA"))
+    scanner_model = get_value(dcm_s1.get([0x0008, 0x1090], "NA"))
+    voxel_dim = get_value(dcm_s1.get([0x0028, 0x0030], "NA"))
+    slice_thickness = get_value(dcm_s1.get([0x0018, 0x0050], "NA"))
+    kvp = get_value(dcm_s1.get([0x0018, 0x0060], "NA"))
+    kernel = get_value(dcm_s1.get([0x0018, 0x1210], "NA"))
+    xr_current = get_value(dcm_s1.get([0x0018, 0x1151], "NA"))
+    exposure_time = get_value(dcm_s1.get([0x0018, 0x1150], "NA"))
+    exposure = get_value(dcm_s1.get([0x0018, 0x1152], "NA"))
+    reconstruction_diameter = get_value(dcm_s1.get([0x0018, 0x1100], "NA"))
+    acq_params = pd.DataFrame({
+        'acq_scanner_manufacturer': [scanner_manufacturer],
+        'acq_scanner_model': [scanner_model],
+        'acq_voxel_dim': [voxel_dim[0]],
+        'acq_slice_thickness': [slice_thickness],
+        'acq_kvp': [kvp],
+        'acq_kernel': [kernel],
+        'acq_xr_current': [xr_current],
+        'acq_exposure_time': [exposure_time],
+        'acq_exposure': [exposure],
+        'acq_reconstruction_diameter': [reconstruction_diameter],
+        'acq_study_date': [study_date]
+    })
+
+    return acq_params
+# </editor-fold>
+
+# <editor-fold desc="File management">
+img_dir = 'H:\ALIAS_img'
+img_files = rec_listdir(img_dir)
+img_subdirs = [os.path.dirname(i) for i in img_files]
+img_ids = [i.split(sep="\\")[3] for i in img_files]
+img_df = pd.DataFrame(tuple(i.split("_")) for i in img_ids)
+img_df.rename(columns={0: 'patient_id', 1: 'scan'}, inplace=True)
+img_df['img_file'] = img_files
+img_df['img_subdir'] = img_subdirs
+
+seg_dir = 'H:\ALIAS_seg'
+seg_files = rec_listdir(seg_dir)
+seg_files = [i for i in seg_files if i[-4:] == '.dcm']
+seg_files = [i for i in seg_files if os.path.basename(i)[:2] != '._']
+seg_subdirs = [os.path.dirname(i) for i in seg_files]
+seg_ids = [i.split(sep="\\")[2] for i in seg_files]
+seg_df = pd.DataFrame(tuple(i.split("_")) for i in seg_ids)
+seg_df.rename(columns={0: 'patient_id', 1: 'scan'}, inplace=True)
+seg_df['seg_file'] = seg_files
+
+img_subdir_df = img_df.drop(axis=1, labels=['img_file']).drop_duplicates()
+seg_df = seg_df.drop_duplicates()
+
+alias_df = pd.merge(img_subdir_df,
+                    seg_df,
+                    on=['patient_id', 'scan'],
+                    how="inner")
+
+alias_df['ps_id'] = alias_df["patient_id"] + '_' + alias_df["scan"]
+unique_ps_ids = alias_df.ps_id.unique()
+# </editor-fold>
+
+# <editor-fold desc="Set window sampling parameters">
+window_size = 192
+half_window_size = window_size // 2
+n_sample = 30
+class_ratio = 5
+offset = window_size//8
+
+def extract_windows(img_arr, seg_arr, class_ratio, n_sample):
+
+    # positive windows
+    pos_idx = np.array(np.where(seg_arr)).transpose()
+    n_sample_i = min(n_sample, len(pos_idx))
+    pos_idx = pos_idx[np.random.choice(np.arange(len(pos_idx)), size=n_sample_i)]
+    pos_idx[:, 1:] = pos_idx[:, 1:] + np.random.randint(low=-offset,
+                                                        high=offset,
+                                                        size=pos_idx[:, 1:].shape)
+
+    # random windows
+    n_random_sample = n_sample * class_ratio
+    random_idx = np.array([
+        np.random.choice(img_arr.shape[0], size=n_random_sample),
+        np.random.choice(img_arr.shape[1], size=n_random_sample),
+        np.random.choice(img_arr.shape[2], size=n_random_sample)
+    ]).transpose()
+    d1_limits = np.where(img_arr[len(img_arr)//2, :, 255] > 0)[0]
+    d2_limits = np.where(img_arr[len(img_arr)//2, 255, :] > 0)[0]
+    random_idx[:, 1] = np.clip(random_idx[:, 1], a_max=max(d1_limits) - half_window_size, a_min=min(d1_limits) + half_window_size)
+    random_idx[:, 2] = np.clip(random_idx[:, 2], a_max=max(d2_limits) - half_window_size, a_min=min(d2_limits) + half_window_size)
+    centre_idx = np.concatenate([pos_idx, random_idx])
+    centre_idx[:, 1:] = np.clip(centre_idx[:, 1:], a_max=511 - half_window_size, a_min=half_window_size)
+
+    img_windows = []
+    seg_windows = []
+    for centre_i in range(len(centre_idx)):
+        centre = centre_idx[centre_i, :]
+        img_window_i = img_arr[
+                       centre[0],
+                       (centre[1] - half_window_size):(centre[1] + half_window_size),
+                       (centre[2] - half_window_size):(centre[2] + half_window_size)
+                       ]
+        img_windows.append(img_window_i)
+
+        seg_window_i = seg_arr[
+                       centre[0],
+                       (centre[1] - half_window_size):(centre[1] + half_window_size),
+                       (centre[2] - half_window_size):(centre[2] + half_window_size)
+                       ]
+        seg_windows.append(seg_window_i)
+
+    img_windows = np.stack(img_windows).astype(np.int16)
+    seg_windows = np.stack(seg_windows).astype('bool')
+
+    return img_windows, seg_windows
+
+# </editor-fold>
+
+# <editor-fold desc="Save images">
+random.seed(0)
+np.random.seed(0)
+
+output_dir = r'C:\Users\ro20\Documents\Datasets\ALIAS\NPY'
+
+img_windows_output_dir = output_dir + r'\img_windows_' + str(window_size)
+if not os.path.exists(img_windows_output_dir):
+    os.mkdir(img_windows_output_dir)
+seg_windows_output_dir = output_dir + r'\seg_windows_' + str(window_size)
+if not os.path.exists(seg_windows_output_dir):
+    os.mkdir(seg_windows_output_dir)
+
+img_full_output_dir = output_dir + r'\img'
+if not os.path.exists(img_full_output_dir):
+    os.mkdir(img_full_output_dir)
+seg_gtv_full_output_dir = output_dir + r'\seg_gtv'
+if not os.path.exists(seg_gtv_full_output_dir):
+    os.mkdir(seg_gtv_full_output_dir)
+seg_control_full_output_dir = output_dir + r'\seg_control'
+if not os.path.exists(seg_control_full_output_dir):
+    os.mkdir(seg_control_full_output_dir)
+
+acq_params = []
+train_institutions = ['AH', 'ST']
+for ps_id in unique_ps_ids:
+
+    print(ps_id)
+
+    obs_i_list = np.where(alias_df.ps_id == ps_id)[0]
+    patient_id = alias_df.patient_id[obs_i_list[0]]
+    scan = alias_df.scan[obs_i_list[0]]
+    train_instance = patient_id[:2] in train_institutions
+    seg_list_gtv = []
+    seg_list_control = []
+
+    for obs_i in obs_i_list:
+        rtstruct_i = rt_utils.RTStructBuilder.create_from(
+            dicom_series_path=alias_df.img_subdir[obs_i],
+            rt_struct_path=alias_df.seg_file[obs_i]
+        )
+        roi_names = rtstruct_i.get_roi_names()
+        z_name = [i for i in roi_names if i != 'X'][0]
+
+        if obs_i == obs_i_list[0]:
+            img_arr = []
+            for dcm_i in rtstruct_i.series_data:
+                arr_i = dcm_i.pixel_array
+                arr_i = pydicom.pixel_data_handlers.util.apply_modality_lut(arr_i, dcm_i)
+                img_arr.append(arr_i)
+            img_arr = np.stack([img_arr])
+            img_arr = np.squeeze(img_arr)
+
+        # tumour segmentation
+        if 'X' in roi_names:
+            seg_arr_gtv = rtstruct_i.get_roi_mask_by_name('X')
+            seg_arr_gtv = np.moveaxis(seg_arr_gtv,
+                                    source=-1,
+                                    destination=0)
+            seg_arr_gtv[img_arr < -150] = 0
+            seg_arr_gtv[img_arr > 300] = 0
+            seg_list_gtv.append(seg_arr_gtv)
+        else:
+            seg_arr_gtv = np.zeros_like(img_arr).astype('bool')
+            seg_list_gtv.append(seg_arr_gtv)
+
+        # control region segmentation
+        if 'Y' in roi_names:
+            seg_arr_control = rtstruct_i.get_roi_mask_by_name('Y')
+        if 'Z' in roi_names:
+            seg_arr_control = rtstruct_i.get_roi_mask_by_name('Z')
+        seg_arr_control = np.moveaxis(seg_arr_control,
+                                  source=-1,
+                                  destination=0)
+        seg_list_control.append(seg_arr_control)
+
+    img_arr = img_arr.astype(np.int16)
+    seg_arr_gtv = np.any(seg_list_gtv, axis=0).astype(np.bool)
+    seg_arr_control = np.any(seg_list_control, axis=0).astype(np.bool)
+
+    # save full images and segmentations
+    np.save(arr=img_arr,
+            file=img_full_output_dir + '\\' + ps_id + '.npy')
+    np.save(arr=seg_arr_gtv,
+            file=seg_gtv_full_output_dir + '\\' + ps_id + '.npy')
+    np.save(arr=seg_arr_control,
+            file=seg_control_full_output_dir + '\\' + ps_id + '.npy')
+
+    # save windows
+    if train_instance:
+
+        img_windows, seg_windows = extract_windows(img_arr, seg_arr_gtv, class_ratio, n_sample)
+        np.save(arr=img_windows,
+                file=img_windows_output_dir + '\\' + ps_id + '.npy')
+        np.save(arr=seg_windows,
+                file=seg_windows_output_dir + '\\' + ps_id + '.npy')
+
+    #extract acquisition parameters
+    dcm_s1_file = alias_df.img_subdir[obs_i] + r'\sc_vol_1.dcm'
+    acq_params_i = extract_acq_params(dcm_s1_file=dcm_s1_file)
+    acq_params_i['truncation'] = seg_arr_gtv[0].any()
+    acq_params_i[alias_df.columns] = alias_df.iloc[obs_i, :]
+    acq_params.append(acq_params_i)
+
+acq_params = pd.concat(acq_params)
+acq_params.to_csv(path_or_buf=r'acq_params\alias_09_12_22.csv')
+del img_arr, seg_arr_gtv, seg_arr_control, seg_list_gtv, seg_list_control, img_windows, seg_windows
+# </editor-fold>
+
+# </editor-fold>
+
+
+# <editor-fold desc="Intensity Proportion measurement">
+
+# <editor-fold desc="Import libraries">
+import os
+import pandas as pd
+import numpy as np
+import rt_utils
+import pydicom
+import random
+import matplotlib.pyplot as plt
+# </editor-fold>
+
+# <editor-fold desc="Utility functions">
+def rec_listdir(path):
+    files = []
+    for r, d, f in os.walk(path):
+        for f_i in f:
+            files.append(os.path.join(r, f_i))
+    return files
+
+
+def get_value(x):
+    if hasattr(x, 'value'):
+        return x.value
+    else:
+        return 'NA'
+
+def extract_acq_params(dcm_s1_file):
+
+    dcm_s1 = pydicom.dcmread(dcm_s1_file, stop_before_pixels=True)
+    study_date = get_value(dcm_s1.get([0x0008, 0x0020], "NA"))
+    scanner_manufacturer = get_value(dcm_s1.get([0x0008, 0x0070], "NA"))
+    scanner_model = get_value(dcm_s1.get([0x0008, 0x1090], "NA"))
+    voxel_dim = get_value(dcm_s1.get([0x0028, 0x0030], "NA"))
+    slice_thickness = get_value(dcm_s1.get([0x0018, 0x0050], "NA"))
+    kvp = get_value(dcm_s1.get([0x0018, 0x0060], "NA"))
+    kernel = get_value(dcm_s1.get([0x0018, 0x1210], "NA"))
+    xr_current = get_value(dcm_s1.get([0x0018, 0x1151], "NA"))
+    exposure_time = get_value(dcm_s1.get([0x0018, 0x1150], "NA"))
+    exposure = get_value(dcm_s1.get([0x0018, 0x1152], "NA"))
+    reconstruction_diameter = get_value(dcm_s1.get([0x0018, 0x1100], "NA"))
+    acq_params = pd.DataFrame({
+        'acq_scanner_manufacturer': [scanner_manufacturer],
+        'acq_scanner_model': [scanner_model],
+        'acq_voxel_dim': [voxel_dim[0]],
+        'acq_slice_thickness': [slice_thickness],
+        'acq_kvp': [kvp],
+        'acq_kernel': [kernel],
+        'acq_xr_current': [xr_current],
+        'acq_exposure_time': [exposure_time],
+        'acq_exposure': [exposure],
+        'acq_reconstruction_diameter': [reconstruction_diameter],
+        'acq_study_date': [study_date]
+    })
+
+    return acq_params
+# </editor-fold>
+
+# <editor-fold desc="File management">
+img_dir = 'H:\ALIAS_img'
+img_files = rec_listdir(img_dir)
+img_subdirs = [os.path.dirname(i) for i in img_files]
+img_ids = [i.split(sep="\\")[3] for i in img_files]
+img_df = pd.DataFrame(tuple(i.split("_")) for i in img_ids)
+img_df.rename(columns={0: 'patient_id', 1: 'scan'}, inplace=True)
+img_df['img_file'] = img_files
+img_df['img_subdir'] = img_subdirs
+
+seg_dir = 'H:\ALIAS_seg'
+seg_files = rec_listdir(seg_dir)
+seg_files = [i for i in seg_files if i[-4:] == '.dcm']
+seg_files = [i for i in seg_files if os.path.basename(i)[:2] != '._']
+seg_subdirs = [os.path.dirname(i) for i in seg_files]
+seg_ids = [i.split(sep="\\")[2] for i in seg_files]
+seg_df = pd.DataFrame(tuple(i.split("_")) for i in seg_ids)
+seg_df.rename(columns={0: 'patient_id', 1: 'scan'}, inplace=True)
+seg_df['seg_file'] = seg_files
+
+img_subdir_df = img_df.drop(axis=1, labels=['img_file']).drop_duplicates()
+seg_df = seg_df.drop_duplicates()
+
+alias_df = pd.merge(img_subdir_df,
+                    seg_df,
+                    on=['patient_id', 'scan'],
+                    how="inner")
+
+alias_df['ps_id'] = alias_df["patient_id"] + '_' + alias_df["scan"]
+unique_ps_ids = alias_df.ps_id.unique()
+# </editor-fold>
+
+def get_histogram(img_i, seg_i):
+
+    img_roi_i = img_i[seg_i==1]
+    total_i = seg_i.sum()
+    hist_counts, hist_bins = np.histogram(img_roi_i, bins = np.arange(-150, 301, 25))
+    hist_bins = [str(hist_bins[i]) + "-" + str(hist_bins[i+1]) for i in range(len(hist_bins)-1)]
+    hist_i = {hist_bins[i]: hist_counts[i] for i in range(len(hist_counts))}
+    hist_i['fibrosis_level'] = (img_roi_i >= 75).mean()
+    hist_i['total'] = total_i
+    return hist_i
+
+img_dir = r'C:\\Users\\ro20\\Documents\\Datasets\\ALIAS\\NPY\\img'
+seg_dir = r'C:\\Users\\ro20\\Documents\\Datasets\\ALIAS\\NPY\\seg_gtv'
+img_files = rec_listdir(img_dir)
+seg_files = rec_listdir(seg_dir)
+
+intensity_hist_df = []
+for obs_i in range(len(img_files)):
+    print(obs_i)
+    basename_i = os.path.basename(img_files[obs_i])[:-4]
+    patient_id, scan = basename_i.split('_')
+    img_i = np.load(img_files[obs_i])
+    seg_i = np.load(seg_files[obs_i])
+    hist_i = get_histogram(img_i, seg_i)
+    hist_i['patient_id'] = patient_id
+    hist_i['scan'] = scan
+    intensity_hist_df.append(hist_i)
+
+intensity_hist_df = pd.DataFrame(intensity_hist_df)
+intensity_hist_df = pd.concat([intensity_hist_df.iloc[:, :-2], intensity_hist_df.iloc[:, -2:]], axis=1)
+intensity_hist_df.to_csv('tables/intensity_hist_df.csv')
+
+
+
+img_dir = r'C:\\Users\\ro20\\Documents\\Datasets\\ALIAS\\NPY\\img'
+seg_dir = r'C:\\Users\\ro20\\Documents\\Datasets\\ALIAS\\NPY\\seg_gtv'
+img_files = rec_listdir(img_dir)
+basenames = [os.path.basename(i)[:-4].split('_') for i in img_files]
+img_df = pd.DataFrame({
+    'img_file': img_files,
+    'patient_id': [i[0] for i in basenames],
+    'scan': [i[1] for i in basenames]
+})
+seg_files = rec_listdir(seg_dir)
+basenames = [os.path.basename(i)[:-4].split('_') for i in seg_files]
+seg_df = pd.DataFrame({
+    'seg_file': seg_files,
+    'patient_id': [i[0] for i in basenames],
+    'scan': [i[1] for i in basenames]
+})
+img_df = pd.merge(img_df, seg_df)
+
+enhancement_score_df = []
+for obs_i in range(len(img_df)):
+    print(obs_i)
+    basename_i = os.path.basename(img_files[obs_i])[:-4]
+    patient_id, scan = basename_i.split('_')
+    img_i = np.load(img_df.img_file[obs_i], mmap_mode='r')
+    seg_i = np.load(img_df.seg_file[obs_i])
+    img_roi_i = img_i[seg_i]
+    enhancement_score_25_i = (img_roi_i >= 25).mean()
+    enhancement_score_50_i = (img_roi_i >= 50).mean()
+    enhancement_score_75_i = (img_roi_i >= 75).mean()
+    enhancement_score_100_i = (img_roi_i >= 100).mean()
+    enhancement_score_df_i = {
+        'patient_id': patient_id,
+        'scan': scan,
+        'enhancement_score_25': enhancement_score_25_i,
+        'enhancement_score_50': enhancement_score_50_i,
+        'enhancement_score_75': enhancement_score_75_i,
+        'enhancement_score_100': enhancement_score_100_i,
+        'volume': seg_i.sum()
+    }
+    enhancement_score_df.append(enhancement_score_df_i)
+
+enhancement_score_df = pd.DataFrame(enhancement_score_df)
+enhancement_score_df.to_csv('tables/enhancement_score_df.csv')
+
+
+
+
+
+
+
+
+
+
+
+# </editor-fold>
+
+# <editor-fold desc="Intensity Proportion measurement alternative">
+
+# <editor-fold desc="Import libraries">
+import os
+import pandas as pd
+import numpy as np
+import rt_utils
+import pydicom
+import random
+import matplotlib.pyplot as plt
+# </editor-fold>
+
+# <editor-fold desc="Utility functions">
+def rec_listdir(path):
+    files = []
+    for r, d, f in os.walk(path):
+        for f_i in f:
+            files.append(os.path.join(r, f_i))
+    return files
+
+
+def get_value(x):
+    if hasattr(x, 'value'):
+        return x.value
+    else:
+        return 'NA'
+
+def extract_acq_params(dcm_s1_file):
+
+    dcm_s1 = pydicom.dcmread(dcm_s1_file, stop_before_pixels=True)
+    study_date = get_value(dcm_s1.get([0x0008, 0x0020], "NA"))
+    scanner_manufacturer = get_value(dcm_s1.get([0x0008, 0x0070], "NA"))
+    scanner_model = get_value(dcm_s1.get([0x0008, 0x1090], "NA"))
+    voxel_dim = get_value(dcm_s1.get([0x0028, 0x0030], "NA"))
+    slice_thickness = get_value(dcm_s1.get([0x0018, 0x0050], "NA"))
+    kvp = get_value(dcm_s1.get([0x0018, 0x0060], "NA"))
+    kernel = get_value(dcm_s1.get([0x0018, 0x1210], "NA"))
+    xr_current = get_value(dcm_s1.get([0x0018, 0x1151], "NA"))
+    exposure_time = get_value(dcm_s1.get([0x0018, 0x1150], "NA"))
+    exposure = get_value(dcm_s1.get([0x0018, 0x1152], "NA"))
+    reconstruction_diameter = get_value(dcm_s1.get([0x0018, 0x1100], "NA"))
+    acq_params = pd.DataFrame({
+        'acq_scanner_manufacturer': [scanner_manufacturer],
+        'acq_scanner_model': [scanner_model],
+        'acq_voxel_dim': [voxel_dim[0]],
+        'acq_slice_thickness': [slice_thickness],
+        'acq_kvp': [kvp],
+        'acq_kernel': [kernel],
+        'acq_xr_current': [xr_current],
+        'acq_exposure_time': [exposure_time],
+        'acq_exposure': [exposure],
+        'acq_reconstruction_diameter': [reconstruction_diameter],
+        'acq_study_date': [study_date]
+    })
+
+    return acq_params
+# </editor-fold>
+
+# <editor-fold desc="File management">
+img_dir = 'H:\ALIAS_img'
+img_files = rec_listdir(img_dir)
+img_subdirs = [os.path.dirname(i) for i in img_files]
+img_ids = [i.split(sep="\\")[3] for i in img_files]
+img_df = pd.DataFrame(tuple(i.split("_")) for i in img_ids)
+img_df.rename(columns={0: 'patient_id', 1: 'scan'}, inplace=True)
+img_df['img_file'] = img_files
+img_df['img_subdir'] = img_subdirs
+
+seg_dir = 'H:\ALIAS_seg'
+seg_files = rec_listdir(seg_dir)
+seg_files = [i for i in seg_files if i[-4:] == '.dcm']
+seg_files = [i for i in seg_files if os.path.basename(i)[:2] != '._']
+seg_subdirs = [os.path.dirname(i) for i in seg_files]
+seg_ids = [i.split(sep="\\")[2] for i in seg_files]
+seg_df = pd.DataFrame(tuple(i.split("_")) for i in seg_ids)
+seg_df.rename(columns={0: 'patient_id', 1: 'scan'}, inplace=True)
+seg_df['seg_file'] = seg_files
+
+img_subdir_df = img_df.drop(axis=1, labels=['img_file']).drop_duplicates()
+seg_df = seg_df.drop_duplicates()
+
+alias_df = pd.merge(img_subdir_df,
+                    seg_df,
+                    on=['patient_id', 'scan'],
+                    how="inner")
+
+alias_df['ps_id'] = alias_df["patient_id"] + '_' + alias_df["scan"]
+unique_ps_ids = alias_df.ps_id.unique()
+# </editor-fold>
+
+
+img_dir = r'C:\\Users\\ro20\\Documents\\Datasets\\ALIAS\\NPY\\img'
+seg_dir = r'C:\\Users\\ro20\\Documents\\Datasets\\ALIAS\\NPY\\seg_gtv'
+img_files = rec_listdir(img_dir)
+basenames = [os.path.basename(i)[:-4].split('_') for i in img_files]
+img_df = pd.DataFrame({
+    'img_file': img_files,
+    'patient_id': [i[0] for i in basenames],
+    'scan': [i[1] for i in basenames]
+})
+seg_files = rec_listdir(seg_dir)
+basenames = [os.path.basename(i)[:-4].split('_') for i in seg_files]
+seg_df = pd.DataFrame({
+    'seg_file': seg_files,
+    'patient_id': [i[0] for i in basenames],
+    'scan': [i[1] for i in basenames]
+})
+img_df = pd.merge(img_df, seg_df)
+
+enhancement_score_df = []
+thres = np.arange(5)*25
+thres_names = ['enhancement_score_' + str(i) for i in thres]
+for obs_i in range(len(img_df)):
+    print(obs_i)
+    basename_i = os.path.basename(img_files[obs_i])[:-4]
+    patient_id, scan = basename_i.split('_')
+    img_i = np.load(img_df.img_file[obs_i], mmap_mode='r')
+    seg_i = np.load(img_df.seg_file[obs_i])
+    img_roi_i = img_i[seg_i]
+    enhancement_score_25_i = (img_roi_i*(img_roi_i >= 25)).mean()
+    enhancement_score_50_i = (img_roi_i*(img_roi_i >= 50)).mean()
+    enhancement_score_75_i = (img_roi_i*(img_roi_i >= 75)).mean()
+    enhancement_score_100_i = (img_roi_i*(img_roi_i >= 100)).mean()
+    enhancement_score_df_i = {
+        'patient_id': patient_id,
+        'scan': scan,
+        'enhancement_score_25': enhancement_score_25_i,
+        'enhancement_score_50': enhancement_score_50_i,
+        'enhancement_score_75': enhancement_score_75_i,
+        'enhancement_score_100': enhancement_score_100_i,
+        'volume': seg_i.sum()
+    }
+    enhancement_score_df.append(enhancement_score_df_i)
+
+enhancement_score_df = pd.DataFrame(enhancement_score_df)
+enhancement_score_df.to_csv('tables/enhancement_score_df_05_06_23.csv')
+
+
+
+
+
+
+
+
+
+
+
+# </editor-fold>
+
+
+# <editor-fold desc="Intensity Proportion measurement surface only">
+
+# <editor-fold desc="Import libraries">
+import os
+import pandas as pd
+import numpy as np
+from skimage.segmentation import find_boundaries
+# </editor-fold>
+
+# <editor-fold desc="Utility functions">
+def rec_listdir(path):
+    files = []
+    for r, d, f in os.walk(path):
+        for f_i in f:
+            files.append(os.path.join(r, f_i))
+    return files
+
+
+def get_value(x):
+    if hasattr(x, 'value'):
+        return x.value
+    else:
+        return 'NA'
+
+def extract_acq_params(dcm_s1_file):
+
+    dcm_s1 = pydicom.dcmread(dcm_s1_file, stop_before_pixels=True)
+    study_date = get_value(dcm_s1.get([0x0008, 0x0020], "NA"))
+    scanner_manufacturer = get_value(dcm_s1.get([0x0008, 0x0070], "NA"))
+    scanner_model = get_value(dcm_s1.get([0x0008, 0x1090], "NA"))
+    voxel_dim = get_value(dcm_s1.get([0x0028, 0x0030], "NA"))
+    slice_thickness = get_value(dcm_s1.get([0x0018, 0x0050], "NA"))
+    kvp = get_value(dcm_s1.get([0x0018, 0x0060], "NA"))
+    kernel = get_value(dcm_s1.get([0x0018, 0x1210], "NA"))
+    xr_current = get_value(dcm_s1.get([0x0018, 0x1151], "NA"))
+    exposure_time = get_value(dcm_s1.get([0x0018, 0x1150], "NA"))
+    exposure = get_value(dcm_s1.get([0x0018, 0x1152], "NA"))
+    reconstruction_diameter = get_value(dcm_s1.get([0x0018, 0x1100], "NA"))
+    acq_params = pd.DataFrame({
+        'acq_scanner_manufacturer': [scanner_manufacturer],
+        'acq_scanner_model': [scanner_model],
+        'acq_voxel_dim': [voxel_dim[0]],
+        'acq_slice_thickness': [slice_thickness],
+        'acq_kvp': [kvp],
+        'acq_kernel': [kernel],
+        'acq_xr_current': [xr_current],
+        'acq_exposure_time': [exposure_time],
+        'acq_exposure': [exposure],
+        'acq_reconstruction_diameter': [reconstruction_diameter],
+        'acq_study_date': [study_date]
+    })
+
+    return acq_params
+# </editor-fold>
+
+# <editor-fold desc="File management">
+img_dir = 'H:\ALIAS_img'
+img_files = rec_listdir(img_dir)
+img_subdirs = [os.path.dirname(i) for i in img_files]
+img_ids = [i.split(sep="\\")[3] for i in img_files]
+img_df = pd.DataFrame(tuple(i.split("_")) for i in img_ids)
+img_df.rename(columns={0: 'patient_id', 1: 'scan'}, inplace=True)
+img_df['img_file'] = img_files
+img_df['img_subdir'] = img_subdirs
+
+seg_dir = 'H:\ALIAS_seg'
+seg_files = rec_listdir(seg_dir)
+seg_files = [i for i in seg_files if i[-4:] == '.dcm']
+seg_files = [i for i in seg_files if os.path.basename(i)[:2] != '._']
+seg_subdirs = [os.path.dirname(i) for i in seg_files]
+seg_ids = [i.split(sep="\\")[2] for i in seg_files]
+seg_df = pd.DataFrame(tuple(i.split("_")) for i in seg_ids)
+seg_df.rename(columns={0: 'patient_id', 1: 'scan'}, inplace=True)
+seg_df['seg_file'] = seg_files
+
+img_subdir_df = img_df.drop(axis=1, labels=['img_file']).drop_duplicates()
+seg_df = seg_df.drop_duplicates()
+
+alias_df = pd.merge(img_subdir_df,
+                    seg_df,
+                    on=['patient_id', 'scan'],
+                    how="inner")
+
+alias_df['ps_id'] = alias_df["patient_id"] + '_' + alias_df["scan"]
+unique_ps_ids = alias_df.ps_id.unique()
+# </editor-fold>
+
+img_dir = r'C:\\Users\\ro20\\Documents\\Datasets\\ALIAS\\NPY\\img'
+seg_dir = r'C:\\Users\\ro20\\Documents\\Datasets\\ALIAS\\NPY\\seg_gtv'
+img_files = rec_listdir(img_dir)
+basenames = [os.path.basename(i)[:-4].split('_') for i in img_files]
+img_df = pd.DataFrame({
+    'img_file': img_files,
+    'patient_id': [i[0] for i in basenames],
+    'scan': [i[1] for i in basenames]
+})
+seg_files = rec_listdir(seg_dir)
+basenames = [os.path.basename(i)[:-4].split('_') for i in seg_files]
+seg_df = pd.DataFrame({
+    'seg_file': seg_files,
+    'patient_id': [i[0] for i in basenames],
+    'scan': [i[1] for i in basenames]
+})
+img_df = pd.merge(img_df, seg_df)
+
+
+enhancement_score_df = []
+for obs_i in range(len(img_df)):
+    print(obs_i)
+    basename_i = os.path.basename(img_files[obs_i])[:-4]
+    patient_id, scan = basename_i.split('_')
+    img_i = np.load(img_df.img_file[obs_i], mmap_mode='r')
+    seg_i = np.load(img_df.seg_file[obs_i])
+    surface_i = find_boundaries(seg_i, connectivity=3, mode="inner")
+    img_seg_i = img_i[seg_i]
+    img_surface_i = img_i[surface_i]
+    ef_25_i = (img_seg_i >= 25).mean()
+    ef_50_i = (img_seg_i >= 50).mean()
+    ef_75_i = (img_seg_i >= 75).mean()
+    ef_100_i = (img_seg_i >= 100).mean()
+    esf_25_i = (img_surface_i >= 25).mean()
+    esf_50_i = (img_surface_i >= 50).mean()
+    esf_75_i = (img_surface_i >= 75).mean()
+    esf_100_i = (img_surface_i >= 100).mean()
+    enhancement_score_df_i = {
+        'patient_id': patient_id,
+        'scan': scan,
+        'ef_25': ef_25_i,
+        'ef_50': ef_50_i,
+        'ef_75': ef_75_i,
+        'ef_100': ef_100_i,
+        'esf_25': esf_25_i,
+        'esf_50': esf_50_i,
+        'esf_75': esf_75_i,
+        'esf_100': esf_100_i,
+        'surface_volume': seg_i.sum()
+    }
+    enhancement_score_df.append(enhancement_score_df_i)
+
+enhancement_score_df = pd.DataFrame(enhancement_score_df)
+enhancement_score_df.to_csv('tables/enhancement_score_df_08_06_23.csv')
+
+enhancement_mean_df = []
+for obs_i in range(len(img_df)):
+    print(obs_i)
+    basename_i = os.path.basename(img_files[obs_i])[:-4]
+    patient_id, scan = basename_i.split('_')
+    img_i = np.load(img_df.img_file[obs_i], mmap_mode='r')
+    seg_i = np.load(img_df.seg_file[obs_i])
+    surface_i = find_boundaries(seg_i, connectivity=3, mode="inner")
+    img_seg_i = img_i[seg_i]
+    img_surface_i = img_i[surface_i]
+    ef_i = img_seg_i.mean()
+    esf_i = img_surface_i.mean()
+    enhancement_mean_df_i = {
+        'patient_id': patient_id,
+        'scan': scan,
+        'ef': ef_i,
+        'esf': esf_i,
+        'volume_count': seg_i.sum(),
+        'surface_volume': surface_i.sum()
+    }
+    enhancement_mean_df.append(enhancement_mean_df_i)
+
+enhancement_mean_df = pd.DataFrame(enhancement_mean_df)
+enhancement_mean_df.to_csv('tables/enhancement_mean_df_08_06_23.csv')
+enhancement_mean_df.columns = ['patient_id', 'scan', 'ef', 'esf', 'volume_count',
+       'surface_volume']
+
+
+
+
+
+# </editor-fold>
+
+
+# <editor-fold desc="MVA visualisation">
+
+# <editor-fold desc="Import libraries">
+import os
+import pandas as pd
+import numpy as np
+import rt_utils
+import pydicom
+import random
+import matplotlib.pyplot as plt
+# </editor-fold>
+
+# <editor-fold desc="Utility functions">
+def rec_listdir(path):
+    files = []
+    for r, d, f in os.walk(path):
+        for f_i in f:
+            files.append(os.path.join(r, f_i))
+    return files
+
+
+def get_value(x):
+    if hasattr(x, 'value'):
+        return x.value
+    else:
+        return 'NA'
+
+def extract_acq_params(dcm_s1_file):
+
+    dcm_s1 = pydicom.dcmread(dcm_s1_file, stop_before_pixels=True)
+    study_date = get_value(dcm_s1.get([0x0008, 0x0020], "NA"))
+    scanner_manufacturer = get_value(dcm_s1.get([0x0008, 0x0070], "NA"))
+    scanner_model = get_value(dcm_s1.get([0x0008, 0x1090], "NA"))
+    voxel_dim = get_value(dcm_s1.get([0x0028, 0x0030], "NA"))
+    slice_thickness = get_value(dcm_s1.get([0x0018, 0x0050], "NA"))
+    kvp = get_value(dcm_s1.get([0x0018, 0x0060], "NA"))
+    kernel = get_value(dcm_s1.get([0x0018, 0x1210], "NA"))
+    xr_current = get_value(dcm_s1.get([0x0018, 0x1151], "NA"))
+    exposure_time = get_value(dcm_s1.get([0x0018, 0x1150], "NA"))
+    exposure = get_value(dcm_s1.get([0x0018, 0x1152], "NA"))
+    reconstruction_diameter = get_value(dcm_s1.get([0x0018, 0x1100], "NA"))
+    acq_params = pd.DataFrame({
+        'acq_scanner_manufacturer': [scanner_manufacturer],
+        'acq_scanner_model': [scanner_model],
+        'acq_voxel_dim': [voxel_dim[0]],
+        'acq_slice_thickness': [slice_thickness],
+        'acq_kvp': [kvp],
+        'acq_kernel': [kernel],
+        'acq_xr_current': [xr_current],
+        'acq_exposure_time': [exposure_time],
+        'acq_exposure': [exposure],
+        'acq_reconstruction_diameter': [reconstruction_diameter],
+        'acq_study_date': [study_date]
+    })
+
+    return acq_params
+# </editor-fold>
+
+# <editor-fold desc="File management">
+img_dir = 'H:\ALIAS_img'
+img_files = rec_listdir(img_dir)
+img_subdirs = [os.path.dirname(i) for i in img_files]
+img_ids = [i.split(sep="\\")[3] for i in img_files]
+img_df = pd.DataFrame(tuple(i.split("_")) for i in img_ids)
+img_df.rename(columns={0: 'patient_id', 1: 'scan'}, inplace=True)
+img_df['img_file'] = img_files
+img_df['img_subdir'] = img_subdirs
+
+seg_dir = 'H:\ALIAS_seg'
+seg_files = rec_listdir(seg_dir)
+seg_files = [i for i in seg_files if i[-4:] == '.dcm']
+seg_files = [i for i in seg_files if os.path.basename(i)[:2] != '._']
+seg_subdirs = [os.path.dirname(i) for i in seg_files]
+seg_ids = [i.split(sep="\\")[2] for i in seg_files]
+seg_df = pd.DataFrame(tuple(i.split("_")) for i in seg_ids)
+seg_df.rename(columns={0: 'patient_id', 1: 'scan'}, inplace=True)
+seg_df['seg_file'] = seg_files
+
+img_subdir_df = img_df.drop(axis=1, labels=['img_file']).drop_duplicates()
+seg_df = seg_df.drop_duplicates()
+
+alias_df = pd.merge(img_subdir_df,
+                    seg_df,
+                    on=['patient_id', 'scan'],
+                    how="inner")
+
+alias_df['ps_id'] = alias_df["patient_id"] + '_' + alias_df["scan"]
+unique_ps_ids = alias_df.ps_id.unique()
+# </editor-fold>
+
+selected_df = pd.read_csv(
+    "C:/Users/ro20/Documents/R Projects/alias mandard/tables/selected_df.csv")
+
+selected_df.ef = "MVA: " + selected_df.ef.astype(str)
+selected_df.mandard_response = "TRG" + selected_df.mandard_response.astype(str)
+selected_df.path_invasion = ['LVI' if i ==1 else 'No LVI' for i in selected_df.path_invasion]
+selected_df['plt_label'] = selected_df.mandard_response + '\n' + selected_df.path_invasion #+ '\n' + selected_df.enhancement_score_50
+
+
+
+
+
+img_dir = r'C:\Users\ro20\Documents\Datasets\ALIAS\NPY\img'
+seg_dir = r'C:\Users\ro20\Documents\Datasets\ALIAS\NPY\seg'
+img_files = rec_listdir(img_dir)
+img_files_2 = [i for i in img_files if "SCAN2" in i]
+seg_files = rec_listdir(seg_dir)
+seg_files_2 = [i for i in seg_files if "SCAN2" in i]
+
+plt.close()
+fig, axs = plt.subplots(3, 4)
+plt.setp(axs.flat, xticks=[], yticks=[])
+for obs_i in range(len(selected_df)):
+    patient_id = selected_df.patient_id[obs_i]
+    img_file_2 = [i for i in img_files_2 if patient_id in i][0]
+    seg_file_2 = [i for i in seg_files_2 if patient_id in i][0]
+
+    img = np.load(img_file_2)
+    seg = np.load(seg_file_2)
+    midpoint = np.median(np.where(seg), axis=1).astype(int)
+    slice_idx = midpoint[0]
+    start_idx_1 = midpoint[1] - 100
+    end_idx_1 = midpoint[1] + 100
+    start_idx_2 = midpoint[2] - 100
+    end_idx_2 = midpoint[2] + 100
+    x_i = img[slice_idx, start_idx_1:end_idx_1, start_idx_2:end_idx_2]
+    seg_i = seg[slice_idx, start_idx_1:end_idx_1, start_idx_2:end_idx_2]
+    enhance_i = x_i.copy()
+    enhance_i[seg_i==0] = -100
+    #seg_i[enhance_i] = False
+
+    axs[0, obs_i].imshow(-x_i,
+                         vmax=300,
+                         vmin=-400,
+                         cmap='Greys')
+
+    axs[1, obs_i].imshow(-x_i,
+                         vmax=300,
+                         vmin=-400,
+                         cmap='Greys')
+    axs[1, obs_i].imshow(seg_i,
+                         cmap='Greens', alpha=0.4)
+
+    axs[2, obs_i].imshow(-x_i,
+                         vmax=300,
+                         vmin=-400,
+                         cmap='Greys')
+    axs[2, obs_i].imshow(enhance_i,
+                         cmap='Reds',
+                         vmax=100,
+                         vmin=-0,
+                         alpha=0.6)
+
+    plt_label_i = 'Participant ' + ['A', 'B', 'C', 'D'][obs_i]
+    axs[0, obs_i].set_title(plt_label_i)
+
+
+# Label rows
+y_labels = ['Image', 'Segmentation', 'Attenuation']
+for i in range(3):
+    axs[i, 0].set_ylabel(y_labels[i], rotation=0, labelpad=45)
+
+
+plt.savefig(fname='figures/trg_lvi_plots_26_11_23.png',
+            dpi=600,
+            bbox_inches='tight'
+            )
+
+
+
+'''
+OCCAMS/SH/051 male 72
+
+'''
+
+
+
+
+
+
+
+# </editor-fold>
+
+
+
+# <editor-fold desc="enhancement score visualisation">
+
+
+# <editor-fold desc="Import libraries">
+import os
+import pandas as pd
+import numpy as np
+import rt_utils
+import pydicom
+import random
+import matplotlib.pyplot as plt
+# </editor-fold>
+
+# <editor-fold desc="Utility functions">
+def rec_listdir(path):
+    files = []
+    for r, d, f in os.walk(path):
+        for f_i in f:
+            files.append(os.path.join(r, f_i))
+    return files
+
+
+def get_value(x):
+    if hasattr(x, 'value'):
+        return x.value
+    else:
+        return 'NA'
+
+def extract_acq_params(dcm_s1_file):
+
+    dcm_s1 = pydicom.dcmread(dcm_s1_file, stop_before_pixels=True)
+    study_date = get_value(dcm_s1.get([0x0008, 0x0020], "NA"))
+    scanner_manufacturer = get_value(dcm_s1.get([0x0008, 0x0070], "NA"))
+    scanner_model = get_value(dcm_s1.get([0x0008, 0x1090], "NA"))
+    voxel_dim = get_value(dcm_s1.get([0x0028, 0x0030], "NA"))
+    slice_thickness = get_value(dcm_s1.get([0x0018, 0x0050], "NA"))
+    kvp = get_value(dcm_s1.get([0x0018, 0x0060], "NA"))
+    kernel = get_value(dcm_s1.get([0x0018, 0x1210], "NA"))
+    xr_current = get_value(dcm_s1.get([0x0018, 0x1151], "NA"))
+    exposure_time = get_value(dcm_s1.get([0x0018, 0x1150], "NA"))
+    exposure = get_value(dcm_s1.get([0x0018, 0x1152], "NA"))
+    reconstruction_diameter = get_value(dcm_s1.get([0x0018, 0x1100], "NA"))
+    acq_params = pd.DataFrame({
+        'acq_scanner_manufacturer': [scanner_manufacturer],
+        'acq_scanner_model': [scanner_model],
+        'acq_voxel_dim': [voxel_dim[0]],
+        'acq_slice_thickness': [slice_thickness],
+        'acq_kvp': [kvp],
+        'acq_kernel': [kernel],
+        'acq_xr_current': [xr_current],
+        'acq_exposure_time': [exposure_time],
+        'acq_exposure': [exposure],
+        'acq_reconstruction_diameter': [reconstruction_diameter],
+        'acq_study_date': [study_date]
+    })
+
+    return acq_params
+# </editor-fold>
+
+# <editor-fold desc="File management">
+img_dir = 'H:\ALIAS_img'
+img_files = rec_listdir(img_dir)
+img_subdirs = [os.path.dirname(i) for i in img_files]
+img_ids = [i.split(sep="\\")[3] for i in img_files]
+img_df = pd.DataFrame(tuple(i.split("_")) for i in img_ids)
+img_df.rename(columns={0: 'patient_id', 1: 'scan'}, inplace=True)
+img_df['img_file'] = img_files
+img_df['img_subdir'] = img_subdirs
+
+seg_dir = 'H:\ALIAS_seg'
+seg_files = rec_listdir(seg_dir)
+seg_files = [i for i in seg_files if i[-4:] == '.dcm']
+seg_files = [i for i in seg_files if os.path.basename(i)[:2] != '._']
+seg_subdirs = [os.path.dirname(i) for i in seg_files]
+seg_ids = [i.split(sep="\\")[2] for i in seg_files]
+seg_df = pd.DataFrame(tuple(i.split("_")) for i in seg_ids)
+seg_df.rename(columns={0: 'patient_id', 1: 'scan'}, inplace=True)
+seg_df['seg_file'] = seg_files
+
+img_subdir_df = img_df.drop(axis=1, labels=['img_file']).drop_duplicates()
+seg_df = seg_df.drop_duplicates()
+
+alias_df = pd.merge(img_subdir_df,
+                    seg_df,
+                    on=['patient_id', 'scan'],
+                    how="inner")
+
+alias_df['ps_id'] = alias_df["patient_id"] + '_' + alias_df["scan"]
+unique_ps_ids = alias_df.ps_id.unique()
+# </editor-fold>
+
+selected_df = pd.read_csv(
+    "C:/Users/ro20/Documents/R Projects/alias mandard/tables/selected_df.csv")
+
+selected_df.enhancement_score_50 = "ES: " + selected_df.enhancement_score_50.astype(str)
+selected_df.path_t_stage = "ypT" + selected_df.path_t_stage.astype(str)
+selected_df.mandard_response = "TRG" + selected_df.mandard_response.astype(str)
+selected_df['plt_label'] = selected_df.mandard_response + '\n' + selected_df.path_t_stage #+ '\n' + selected_df.enhancement_score_50
+
+
+img_dir = r'C:\Users\ro20\Documents\Datasets\ALIAS\NPY\img'
+seg_dir = r'C:\Users\ro20\Documents\Datasets\ALIAS\NPY\seg'
+img_files = rec_listdir(img_dir)
+img_files_2 = [i for i in img_files if "SCAN2" in i]
+seg_files = rec_listdir(seg_dir)
+seg_files_2 = [i for i in seg_files if "SCAN2" in i]
+
+plt.close()
+fig, axs = plt.subplots(3, 4)
+plt.setp(axs.flat, xticks=[], yticks=[])
+for obs_i in range(len(selected_df)):
+    patient_id = selected_df.patient_id[obs_i]
+    img_file_2 = [i for i in img_files_2 if patient_id in i][0]
+    seg_file_2 = [i for i in seg_files_2 if patient_id in i][0]
+
+    img = np.load(img_file_2)
+    seg = np.load(seg_file_2)
+    midpoint = np.median(np.where(seg), axis=1).astype(int)
+    slice_idx = midpoint[0]
+    start_idx_1 = midpoint[1] - 100
+    end_idx_1 = midpoint[1] + 100
+    start_idx_2 = midpoint[2] - 100
+    end_idx_2 = midpoint[2] + 100
+    x_i = img[slice_idx, start_idx_1:end_idx_1, start_idx_2:end_idx_2]
+    seg_i = seg[slice_idx, start_idx_1:end_idx_1, start_idx_2:end_idx_2]
+    enhance_i = (x_i >= 50) & seg_i
+    #seg_i[enhance_i] = False
+
+    axs[0, obs_i].imshow(-x_i,
+                         vmax=300,
+                         vmin=-400,
+                         cmap='Greys')
+
+    axs[1, obs_i].imshow(-x_i,
+                         vmax=300,
+                         vmin=-400,
+                         cmap='Greys')
+    axs[1, obs_i].imshow(seg_i,
+                         cmap='Greens', alpha=0.4)
+
+    axs[2, obs_i].imshow(-x_i,
+                         vmax=300,
+                         vmin=-400,
+                         cmap='Greys')
+    axs[2, obs_i].imshow(enhance_i,
+                         cmap='Reds', alpha=0.6)
+
+    plt_label_i = selected_df.plt_label[obs_i]
+    axs[2, obs_i].set_xlabel(plt_label_i)
+
+
+# Label rows
+y_labels = ['Image', 'Segmentation', 'Enhancement\n(50 HU)']
+for i in range(3):
+    axs[i, 0].set_ylabel(y_labels[i], rotation=0, labelpad=45)
+
+
+plt.savefig(fname='figures/enhancement_score.png',
+            dpi=600,
+            bbox_inches='tight'
+            )
+
+
+# </editor-fold>
+
+
+# <editor-fold desc="morphological visualisation vol delta">
+
+
+# <editor-fold desc="Import libraries">
+import os
+import pandas as pd
+import numpy as np
+import rt_utils
+import pydicom
+import random
+import matplotlib.pyplot as plt
+# </editor-fold>
+
+# <editor-fold desc="Utility functions">
+def rec_listdir(path):
+    files = []
+    for r, d, f in os.walk(path):
+        for f_i in f:
+            files.append(os.path.join(r, f_i))
+    return files
+
+
+def get_value(x):
+    if hasattr(x, 'value'):
+        return x.value
+    else:
+        return 'NA'
+
+def extract_acq_params(dcm_s1_file):
+
+    dcm_s1 = pydicom.dcmread(dcm_s1_file, stop_before_pixels=True)
+    study_date = get_value(dcm_s1.get([0x0008, 0x0020], "NA"))
+    scanner_manufacturer = get_value(dcm_s1.get([0x0008, 0x0070], "NA"))
+    scanner_model = get_value(dcm_s1.get([0x0008, 0x1090], "NA"))
+    voxel_dim = get_value(dcm_s1.get([0x0028, 0x0030], "NA"))
+    slice_thickness = get_value(dcm_s1.get([0x0018, 0x0050], "NA"))
+    kvp = get_value(dcm_s1.get([0x0018, 0x0060], "NA"))
+    kernel = get_value(dcm_s1.get([0x0018, 0x1210], "NA"))
+    xr_current = get_value(dcm_s1.get([0x0018, 0x1151], "NA"))
+    exposure_time = get_value(dcm_s1.get([0x0018, 0x1150], "NA"))
+    exposure = get_value(dcm_s1.get([0x0018, 0x1152], "NA"))
+    reconstruction_diameter = get_value(dcm_s1.get([0x0018, 0x1100], "NA"))
+    acq_params = pd.DataFrame({
+        'acq_scanner_manufacturer': [scanner_manufacturer],
+        'acq_scanner_model': [scanner_model],
+        'acq_voxel_dim': [voxel_dim[0]],
+        'acq_slice_thickness': [slice_thickness],
+        'acq_kvp': [kvp],
+        'acq_kernel': [kernel],
+        'acq_xr_current': [xr_current],
+        'acq_exposure_time': [exposure_time],
+        'acq_exposure': [exposure],
+        'acq_reconstruction_diameter': [reconstruction_diameter],
+        'acq_study_date': [study_date]
+    })
+
+    return acq_params
+# </editor-fold>
+
+# <editor-fold desc="File management">
+img_dir = 'H:\ALIAS_img'
+img_files = rec_listdir(img_dir)
+img_subdirs = [os.path.dirname(i) for i in img_files]
+img_ids = [i.split(sep="\\")[3] for i in img_files]
+img_df = pd.DataFrame(tuple(i.split("_")) for i in img_ids)
+img_df.rename(columns={0: 'patient_id', 1: 'scan'}, inplace=True)
+img_df['img_file'] = img_files
+img_df['img_subdir'] = img_subdirs
+
+seg_dir = 'H:\ALIAS_seg'
+seg_files = rec_listdir(seg_dir)
+seg_files = [i for i in seg_files if i[-4:] == '.dcm']
+seg_files = [i for i in seg_files if os.path.basename(i)[:2] != '._']
+seg_subdirs = [os.path.dirname(i) for i in seg_files]
+seg_ids = [i.split(sep="\\")[2] for i in seg_files]
+seg_df = pd.DataFrame(tuple(i.split("_")) for i in seg_ids)
+seg_df.rename(columns={0: 'patient_id', 1: 'scan'}, inplace=True)
+seg_df['seg_file'] = seg_files
+
+img_subdir_df = img_df.drop(axis=1, labels=['img_file']).drop_duplicates()
+seg_df = seg_df.drop_duplicates()
+
+alias_df = pd.merge(img_subdir_df,
+                    seg_df,
+                    on=['patient_id', 'scan'],
+                    how="inner")
+
+alias_df['ps_id'] = alias_df["patient_id"] + '_' + alias_df["scan"]
+unique_ps_ids = alias_df.ps_id.unique()
+# </editor-fold>
+
+
+selected_delta_df = pd.read_csv(
+    "C:/Users/ro20/Documents/R Projects/alias vol response/tables/selected_delta_df.csv")
+
+selected_delta_df[['vol1', 'vol2', 'svr1', 'svr2']] = selected_delta_df[['vol1', 'vol2', 'svr1', 'svr2']].round(2)
+
+labels_1 = []
+labels_2 = []
+for obs_i in range(len(selected_delta_df)):
+    vol_i = str(selected_delta_df.vol1[obs_i])
+    svr_i = str(selected_delta_df.svr1[obs_i])
+    labels_i = 'Volume: ' + vol_i + 'cm$^3$\nSVR: ' + svr_i + 'cm$^{-1}$'
+    labels_1.append(labels_i)
+    vol_i = str(selected_delta_df.vol2[obs_i])
+    svr_i = str(selected_delta_df.svr2[obs_i])
+    labels_i = 'Volume: ' + vol_i + 'cm$^3$\nSVR: ' + svr_i + 'cm$^{-1}$'
+    labels_2.append(labels_i)
+
+
+
+img_dir = r'C:\Users\ro20\Documents\Datasets\ALIAS\NPY\img'
+seg_dir = r'C:\Users\ro20\Documents\Datasets\ALIAS\NPY\seg'
+img_files = rec_listdir(img_dir)
+img_files_1 = [i for i in img_files if "SCAN1" in i]
+img_files_2 = [i for i in img_files if "SCAN2" in i]
+seg_files = rec_listdir(seg_dir)
+seg_files_1 = [i for i in seg_files if "SCAN1" in i]
+seg_files_2 = [i for i in seg_files if "SCAN2" in i]
+
+obs_i = 0
+patient_id = selected_delta_df.patient_id[obs_i]
+img_file_1 = [i for i in img_files_1 if patient_id in i][0]
+img_file_2 = [i for i in img_files_2 if patient_id in i][0]
+seg_file_1 = [i for i in seg_files_1 if patient_id in i][0]
+seg_file_2 = [i for i in seg_files_2 if patient_id in i][0]
+
+img = np.load(img_file_1)
+seg = np.load(seg_file_1)
+midpoint = np.median(np.where(seg), axis=1).astype(int)
+slice_idx = midpoint[0]
+start_idx_1 = midpoint[1]-100
+end_idx_1 = midpoint[1]+100
+start_idx_2 = midpoint[2]-100
+end_idx_2 = midpoint[2]+100
+x1_i = img[slice_idx, start_idx_1:end_idx_1, start_idx_2:end_idx_2]
+y1_i = seg[slice_idx, start_idx_1:end_idx_1, start_idx_2:end_idx_2]
+
+
+img = np.load(img_file_2)
+seg = np.load(seg_file_2)
+midpoint = np.median(np.where(seg), axis=1).astype(int)
+slice_idx = midpoint[0]
+start_idx_1 = midpoint[1]-100
+end_idx_1 = midpoint[1]+100
+start_idx_2 = midpoint[2]-100
+end_idx_2 = midpoint[2]+100
+x2_i = img[slice_idx, start_idx_1:end_idx_1, start_idx_2:end_idx_2]
+y2_i = seg[slice_idx, start_idx_1:end_idx_1, start_idx_2:end_idx_2]
+
+plt.imshow(-x1_i, cmap='Greys', vmax=300, vmin=-400)
+plt.imshow(y1_i, cmap='Reds', alpha=0.3)
+
+
+plt.imshow(-x2_i, cmap='Greys', vmax=300, vmin=-400)
+plt.imshow(y2_i, cmap='Reds', alpha=0.3)
+
+plt.close()
+fig, axs = plt.subplots(2, 3)
+plt.setp(axs.flat, xticks=[], yticks=[])
+for obs_i in range(3):
+    patient_id = selected_delta_df.patient_id[obs_i]
+    img_file_1 = [i for i in img_files_1 if patient_id in i][0]
+    img_file_2 = [i for i in img_files_2 if patient_id in i][0]
+    seg_file_1 = [i for i in seg_files_1 if patient_id in i][0]
+    seg_file_2 = [i for i in seg_files_2 if patient_id in i][0]
+
+    img = np.load(img_file_1)
+    seg = np.load(seg_file_1)
+    midpoint = np.median(np.where(seg), axis=1).astype(int)
+    slice_idx = midpoint[0]
+    start_idx_1 = midpoint[1] - 100
+    end_idx_1 = midpoint[1] + 100
+    start_idx_2 = midpoint[2] - 100
+    end_idx_2 = midpoint[2] + 100
+    x1_i = img[slice_idx, start_idx_1:end_idx_1, start_idx_2:end_idx_2]
+    y1_i = seg[slice_idx, start_idx_1:end_idx_1, start_idx_2:end_idx_2]
+
+    img = np.load(img_file_2)
+    seg = np.load(seg_file_2)
+    midpoint = np.median(np.where(seg), axis=1).astype(int)
+    slice_idx = midpoint[0]
+    start_idx_1 = midpoint[1] - 100
+    end_idx_1 = midpoint[1] + 100
+    start_idx_2 = midpoint[2] - 100
+    end_idx_2 = midpoint[2] + 100
+    x2_i = img[slice_idx, start_idx_1:end_idx_1, start_idx_2:end_idx_2]
+    y2_i = seg[slice_idx, start_idx_1:end_idx_1, start_idx_2:end_idx_2]
+
+    axs[0, obs_i].imshow(-x1_i,
+                         vmax=300,
+                         vmin=-400,
+                         cmap='Greys')
+
+    axs[0, obs_i].imshow(y1_i,
+                         cmap='Reds', alpha=0.3)
+
+    axs[1, obs_i].imshow(-x2_i,
+                         vmax=300,
+                         vmin=-400,
+                         cmap='Greys')
+
+    axs[1, obs_i].imshow(y2_i,
+                         cmap='Reds', alpha=0.3)
+
+
+
+
+# Label rows
+
+for i in range(2):
+    for j in range(3):
+        if i == 0:
+            axs[i,j].set_xlabel(labels_1[j])
+        else:
+            axs[i,j].set_xlabel(labels_2[j])
+        if j==0:
+            axs[i,j].set_ylabel(['Pre-Treatment', 'Post-Treatment'][i])
+
+
+plt.savefig(fname='figures/volume_delta.png',
+            dpi=600)
+# </editor-fold>
+
+# <editor-fold desc="radiogenomic visualisation vol delta">
+
+# <editor-fold desc="Import libraries">
+import os
+import pandas as pd
+import numpy as np
+import rt_utils
+import pydicom
+import random
+import matplotlib.pyplot as plt
+import SimpleITK as sitk
+# </editor-fold>
+
+# <editor-fold desc="Utility functions">
+def rec_listdir(path):
+    files = []
+    for r, d, f in os.walk(path):
+        for f_i in f:
+            files.append(os.path.join(r, f_i))
+    return files
+
+
+def get_value(x):
+    if hasattr(x, 'value'):
+        return x.value
+    else:
+        return 'NA'
+
+def extract_acq_params(dcm_s1_file):
+
+    dcm_s1 = pydicom.dcmread(dcm_s1_file, stop_before_pixels=True)
+    study_date = get_value(dcm_s1.get([0x0008, 0x0020], "NA"))
+    scanner_manufacturer = get_value(dcm_s1.get([0x0008, 0x0070], "NA"))
+    scanner_model = get_value(dcm_s1.get([0x0008, 0x1090], "NA"))
+    voxel_dim = get_value(dcm_s1.get([0x0028, 0x0030], "NA"))
+    slice_thickness = get_value(dcm_s1.get([0x0018, 0x0050], "NA"))
+    kvp = get_value(dcm_s1.get([0x0018, 0x0060], "NA"))
+    kernel = get_value(dcm_s1.get([0x0018, 0x1210], "NA"))
+    xr_current = get_value(dcm_s1.get([0x0018, 0x1151], "NA"))
+    exposure_time = get_value(dcm_s1.get([0x0018, 0x1150], "NA"))
+    exposure = get_value(dcm_s1.get([0x0018, 0x1152], "NA"))
+    reconstruction_diameter = get_value(dcm_s1.get([0x0018, 0x1100], "NA"))
+    acq_params = pd.DataFrame({
+        'acq_scanner_manufacturer': [scanner_manufacturer],
+        'acq_scanner_model': [scanner_model],
+        'acq_voxel_dim': [voxel_dim[0]],
+        'acq_slice_thickness': [slice_thickness],
+        'acq_kvp': [kvp],
+        'acq_kernel': [kernel],
+        'acq_xr_current': [xr_current],
+        'acq_exposure_time': [exposure_time],
+        'acq_exposure': [exposure],
+        'acq_reconstruction_diameter': [reconstruction_diameter],
+        'acq_study_date': [study_date]
+    })
+
+    return acq_params
+# </editor-fold>
+
+# <editor-fold desc="File management">
+img_dir = 'H:\ALIAS_img'
+img_files = rec_listdir(img_dir)
+img_subdirs = [os.path.dirname(i) for i in img_files]
+img_ids = [i.split(sep="\\")[3] for i in img_files]
+img_df = pd.DataFrame(tuple(i.split("_")) for i in img_ids)
+img_df.rename(columns={0: 'patient_id', 1: 'scan'}, inplace=True)
+img_df['img_file'] = img_files
+img_df['img_subdir'] = img_subdirs
+
+seg_dir = 'H:\ALIAS_seg'
+seg_files = rec_listdir(seg_dir)
+seg_files = [i for i in seg_files if i[-4:] == '.dcm']
+seg_files = [i for i in seg_files if os.path.basename(i)[:2] != '._']
+seg_subdirs = [os.path.dirname(i) for i in seg_files]
+seg_ids = [i.split(sep="\\")[2] for i in seg_files]
+seg_df = pd.DataFrame(tuple(i.split("_")) for i in seg_ids)
+seg_df.rename(columns={0: 'patient_id', 1: 'scan'}, inplace=True)
+seg_df['seg_file'] = seg_files
+
+img_subdir_df = img_df.drop(axis=1, labels=['img_file']).drop_duplicates()
+seg_df = seg_df.drop_duplicates()
+
+alias_df = pd.merge(img_subdir_df,
+                    seg_df,
+                    on=['patient_id', 'scan'],
+                    how="inner")
+
+alias_df['ps_id'] = alias_df["patient_id"] + '_' + alias_df["scan"]
+unique_ps_ids = alias_df.ps_id.unique()
+# </editor-fold>
+
+
+from radiomics import featureextractor
+extractor = featureextractor.RadiomicsFeatureExtractor()
+extractor.disableAllFeatures()
+extractor.enableImageTypeByName('Original')
+extractor.enableFeaturesByName(firstorder=['Energy'],
+                               glszm=['LargeAreaLowGrayLevelEmphasis', 'LargeAreaHighGrayLevelEmphasis']
+                               )
+feature_tnames = [
+    'original_firstorder_Energy',
+    'original_glszm_LargeAreaLowGrayLevelEmphasis',
+    'original_glszm_LargeAreaHighGrayLevelEmphasis']
+
+selected_df = pd.read_csv(
+    "C:/Users/ro20/Documents/R Projects/alias radiogenomics/tables/vis_df.csv")
+
+
+img_dir = r'C:\Users\ro20\Documents\Datasets\ALIAS\NPY\img'
+seg_dir = r'C:\Users\ro20\Documents\Datasets\ALIAS\NPY\seg'
+img_files = rec_listdir(img_dir)
+img_files_2 = [i for i in img_files if "SCAN2" in i]
+seg_files = rec_listdir(seg_dir)
+seg_files_2 = [i for i in seg_files if "SCAN2" in i]
+
+
+plt.close()
+fig, axs = plt.subplots(3, 4)
+plt.setp(axs.flat, xticks=[], yticks=[])
+for obs_i in range(3):
+
+    patient_id = selected_delta_df.patient_id[obs_i]
+    img_file_2 = [i for i in img_files_2 if patient_id in i][0]
+    seg_file_2 = [i for i in seg_files_2 if patient_id in i][0]
+
+    img = np.load(img_file_2)
+    seg = np.load(seg_file_2)
+    midpoint = np.median(np.where(seg), axis=1).astype(int)
+    slice_idx = midpoint[0]
+    start_idx_1 = midpoint[1] - 100
+    end_idx_1 = midpoint[1] + 100
+    start_idx_2 = midpoint[2] - 100
+    end_idx_2 = midpoint[2] + 100
+    img_i = img[slice_idx, start_idx_1:end_idx_1, start_idx_2:end_idx_2, np.newaxis]
+    seg_i = seg[slice_idx, start_idx_1:end_idx_1, start_idx_2:end_idx_2, np.newaxis] * 1
+
+    # extract features
+    img_sitk_i = sitk.GetImageFromArray(img_i)
+    seg_sitk_i = sitk.GetImageFromArray(seg_i)
+    radiomic_features_i = extractor.execute(img_sitk_i, seg_sitk_i, voxelBased=True)
+    bb = radiomic_features_i['diagnostics_Mask-original_BoundingBox']
+    y_i = []
+    for feature_i in range(3):
+        y_ii = sitk.GetArrayFromImage(radiomic_features_i[feature_tnames[feature_i]])
+        if feature_i == 0:
+            y_ii = y_ii - y_ii.min()
+        y_ii2 = np.zeros_like(img_i, dtype=np.float64)
+        y_ii2[(bb[2] - 1):(bb[2] + bb[5] + 1), (bb[1] - 1):(bb[1] + bb[4] + 1), ] = y_ii
+        y_i.append(y_ii2)
+    all_i = [-img_i, seg_i] + y_i
+
+    axs[obs_i, 0].imshow(-img_i,
+                         vmax=300,
+                         vmin=-400,
+                         cmap='Greys')
+
+    colours_set =['Reds', 'Greens', 'Blues']
+    for j in range(3):
+        axs[obs_i, j+1].imshow(-img_i,
+                             vmax=300,
+                             vmin=-400,
+                             cmap='Greys')
+
+        axs[obs_i, j+1].imshow(y_i[j],
+                             cmap=colours_set[j], alpha=0.5)
+
+
+# Label rows
+
+titles = ['Image', 'Energy', 'LALGLE',  'LAHGLE']
+for i in range(4):
+    axs[0, i].set_title(titles[i], fontsize=12)# loc='center',
+plt.savefig(fname='figures/radiogenomics.png',
+            dpi=600)
+# </editor-fold>
+
+
+
+from radiomics import featureextractor
+extractor = featureextractor.RadiomicsFeatureExtractor()
+extractor.disableAllFeatures()
+extractor.enableImageTypeByName('Original')
+extractor.enableFeaturesByName(firstorder=['Energy']
+                               )
+
+feature_tnames = [
+    'original_firstorder_Energy']
+
+selected_df = pd.read_csv(
+    "C:/Users/ro20/Documents/R Projects/alias radiogenomics/tables/vis_df.csv")
+
+
+img_dir = r'C:\Users\ro20\Documents\Datasets\ALIAS\NPY\img'
+seg_dir = r'C:\Users\ro20\Documents\Datasets\ALIAS\NPY\seg'
+img_files = rec_listdir(img_dir)
+img_files_2 = [i for i in img_files if "SCAN2" in i]
+seg_files = rec_listdir(seg_dir)
+seg_files_2 = [i for i in seg_files if "SCAN2" in i]
+
+selected_obs = [32, 61,
+                66, 74]
+from decimal import Decimal
+selected_df['e2'] = ['%.1E' % Decimal(i) for i in selected_df.original_firstorder_Energy]
+
+expression_labels = ['SIRT2: '+ str(round(selected_df.SIRT2[obs_i], 2)) + '\nEnergy: ' + selected_df.e2[obs_i] for obs_i in selected_obs]
+
+plt.close()
+fig, axs = plt.subplots(3, len(selected_obs))
+plt.setp(axs.flat, xticks=[], yticks=[])
+for obs_i in range(len(selected_obs)):
+
+    patient_id = selected_df.patient_id[selected_obs[obs_i]]
+
+    img_file_2 = [i for i in img_files_2 if patient_id in i][0]
+    seg_file_2 = [i for i in seg_files_2 if patient_id in i][0]
+
+    img = np.load(img_file_2)
+    seg = np.load(seg_file_2)
+    #seg[img < -150] = 0
+    #seg[img > 300] = 0
+    midpoint = np.median(np.where(seg), axis=1).astype(int)
+    slice_idx = np.argmax(seg.sum(axis=(1, 2)))
+    start_idx_1 = midpoint[1] - 100
+    end_idx_1 = midpoint[1] + 100
+    start_idx_2 = midpoint[2] - 100
+    end_idx_2 = midpoint[2] + 100
+    img_i = img[slice_idx, start_idx_1:end_idx_1, start_idx_2:end_idx_2, np.newaxis]
+    seg_i = seg[slice_idx, start_idx_1:end_idx_1, start_idx_2:end_idx_2, np.newaxis] * 1
+
+    # extract features
+    img_sitk_i = sitk.GetImageFromArray(img_i)
+    seg_sitk_i = sitk.GetImageFromArray(seg_i)
+    radiomic_features_i = extractor.execute(img_sitk_i, seg_sitk_i, voxelBased=True)
+    bb = radiomic_features_i['diagnostics_Mask-original_BoundingBox']
+    y_i = []
+    for feature_i in range(len(feature_tnames)):
+        y_ii = sitk.GetArrayFromImage(radiomic_features_i[feature_tnames[feature_i]])
+        if feature_i == 0:
+            y_ii = y_ii - y_ii.min()
+        y_ii2 = np.zeros_like(img_i, dtype=np.float64)
+        y_ii2[(bb[2] - 1):(bb[2] + bb[5] + 1), (bb[1] - 1):(bb[1] + bb[4] + 1), ] = y_ii
+        y_i.append(y_ii2)
+    all_i = [-img_i, seg_i] + y_i
+
+    axs[0, obs_i].imshow(-img_i,
+                         vmax=300,
+                         vmin=-400,
+                         cmap='Greys')
+
+    axs[1, obs_i].imshow(-img_i,
+                         vmax=300,
+                         vmin=-400,
+                         cmap='Greys')
+
+    axs[1, obs_i].imshow(seg_i,
+                         cmap='Reds', alpha=0.5)
+
+    axs[2, obs_i].imshow(-img_i,
+                         vmax=300,
+                         vmin=-400,
+                             cmap='Greys')
+
+    axs[2, obs_i].imshow(y_i[0],
+                         vmax=100000,
+                         vmin=0,
+                             cmap='Greens', alpha=0.7)
+
+
+# Label rows
+
+titles = ['Image', 'Segmentation', 'Energy']
+for i in range(len(titles)):
+    axs[i, 0].set_ylabel(titles[i], fontsize=12,
+                         rotation=0,
+                         labelpad=50)
+for i in range(len(selected_obs)):
+    axs[2, i].set_xlabel(expression_labels[i],
+                         fontsize=8
+                         )
+
+
+plt.savefig(fname='figures/radiogenomics_26_05_23.png',
+            dpi=600,
+            bbox_inches="tight"
+            )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+hu_min = -300
+hu_max = 400
+
+
+#radiomic features visualisation
+
+# <editor-fold desc="plotting example">
+import matplotlib.pyplot as plt
+
+
+
+extractor = featureextractor.RadiomicsFeatureExtractor()
+extractor.disableAllFeatures()
+extractor.enableFeaturesByName(glcm=['Correlation', 'Contrast'])
+
+
+img_dir = r'C:\Users\ro20\Documents\Datasets\ALIAS\NPY\img'
+seg_dir = r'C:\Users\ro20\Documents\Datasets\ALIAS\NPY\seg'
+
+img_files = rec_listdir(img_dir)
+seg_files = rec_listdir(seg_dir)
+
+obs_i = 0
+img_arr = np.load(img_files[obs_i])
+seg_arr = np.load(seg_files[obs_i])
+seg_arr = np.squeeze(seg_arr)
+
+middle_idx = np.median(np.array(np.where(seg_arr)), axis=1)
+middle_idx = middle_idx.astype('int')
+
+
+half_window_size = 30
+
+x_i = img_arr[
+      (middle_idx[0] - 5):(middle_idx[0] + 5),
+      (middle_idx[1] - half_window_size):(middle_idx[1] + half_window_size),
+      (middle_idx[2] - half_window_size):(middle_idx[2] + half_window_size)
+      ]
+seg_i = seg_arr[
+        (middle_idx[0] - 5):(middle_idx[0] + 5),
+        (middle_idx[1] - half_window_size):(middle_idx[1] + half_window_size),
+        (middle_idx[2] - half_window_size):(middle_idx[2] + half_window_size)
+        ] * 1
+seg_i[x_i < -400] = 0
+
+roi_idx = np.where(seg_i)
+roi_start_i = roi_idx[0].min()
+roi_start_j = roi_idx[1].min()
+roi_start_k = roi_idx[2].min()
+roi_len_i = roi_idx[0].max() - roi_idx[0].min() #+ 1  # - 2
+roi_len_j = roi_idx[1].max() - roi_idx[1].min() #+ 1  # - 2
+roi_len_k = roi_idx[2].max() - roi_idx[2].min() #+ 1  # - 2
+
+img_sitk_i = sitk.GetImageFromArray(x_i)
+seg_sitk_i = sitk.GetImageFromArray(seg_i)
+y_i = extractor.execute(img_sitk_i, seg_sitk_i, voxelBased=True)
+y1_roi = sitk.GetArrayFromImage(y_i['original_glcm_Contrast'])#, 'Original_firstorder_Correlation'
+
+y1 = np.zeros_like(x_i)
+y1[:y1_roi.shape[0],:y1_roi.shape[1],:y1_roi.shape[2]] = y1_roi
+
+
+
+
+y1[
+roi_start_i:(roi_start_i + roi_len_i + 2),
+roi_start_j:(roi_start_j + roi_len_j + 2),
+roi_start_k:(roi_start_k + roi_len_k + 2),
+] = y1_roi
+
+middle_idx = middle_idx.astype('int')
+
+
+
+
+
+plt.close()
+half_window_size = 50
+fig, axs = plt.subplots(3, 3)
+plt.setp(axs.flat, xticks=[], yticks=[])
+for obs_i in range(3):
+
+    obs_ii = [0,1,2][obs_i]
+    img_arr = np.load(img_files[obs_ii])
+    seg_arr = np.load(seg_files[obs_ii])
+    seg_arr = np.squeeze(seg_arr)
+
+    middle_idx = np.median(np.array(np.where(seg_arr)), axis=1).astype(int)
+
+    x_i = img_arr[
+          (middle_idx[0] - 5):(middle_idx[0] + 5),
+          (middle_idx[1] - half_window_size):(middle_idx[1] + half_window_size),
+          (middle_idx[2] - half_window_size):(middle_idx[2] + half_window_size)
+          ]
+    seg_i = seg_arr[
+            (middle_idx[0] - 5):(middle_idx[0] + 5),
+            (middle_idx[1] - half_window_size):(middle_idx[1] + half_window_size),
+            (middle_idx[2] - half_window_size):(middle_idx[2] + half_window_size)
+            ] * 1
+    seg_i[x_i < -400] = 0
+
+    img_sitk_i = sitk.GetImageFromArray(x_i)
+    seg_sitk_i = sitk.GetImageFromArray(seg_i)
+    y_i = extractor.execute(img_sitk_i, seg_sitk_i, voxelBased=True)
+    y_shape = sitk.GetArrayFromImage(y_i['original_glcm_Contrast']).shape
+    diff = [x_i.shape[j] -y_shape[j] for j in range(3)]
+    start_0 = diff[0]//2
+    end_0 = start_0 + y_shape[0]
+    start_1 = diff[1]//2
+    end_1 = start_1 + y_shape[1]
+    start_2 = diff[2]//2
+    end_2 = start_2 + y_shape[2]
+
+    y1_roi = sitk.GetArrayFromImage(y_i['original_glcm_Contrast'])
+    y1 = np.zeros_like(x_i)
+    y1[
+    start_0:end_0,
+    start_1:end_1,
+    start_2:end_2] = y1_roi
+
+    y2_roi = sitk.GetArrayFromImage(y_i['original_glcm_Correlation'])
+    y2 = np.zeros_like(x_i)
+    y2[
+    start_0:end_0,
+    start_1:end_1,
+    start_2:end_2] = y2_roi
+
+
+    axs[0, obs_i].imshow(x_i[5],
+                         vmax=300,
+                         vmin=-150,
+                         cmap="gray")
+
+    axs[1, obs_i].imshow(x_i[5],
+                         vmax=300,
+                         vmin=-150,
+                         cmap="gray")
+
+    axs[1, obs_i].imshow(y1[5],
+                         #vmin=0,
+                         #vmax=10,
+                         cmap="jet",
+                         alpha=0.6)
+
+    axs[2, obs_i].imshow(x_i[5],
+                         vmax=300,
+                         vmin=-150,
+                         cmap="gray")
+
+    axs[2, obs_i].imshow(y2[5],
+                         #vmin=0,
+                         #vmax=10,
+                         cmap="jet",
+                         alpha=0.6)
+
+
+# Label rows
+for ax, feature in zip(axs[:, 0], ['Input', 'Contrast', 'Correlation']):
+    ax.set_ylabel(feature)
+
+
+plt.savefig(fname='figures/radiomic_vis_energy.png',
+            dpi=600)
+
+
+
+
+
