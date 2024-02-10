@@ -67,7 +67,7 @@ if(T){
   if(T){
     
     #read in clinical data
-    metadata_dir <- "C:/Users/ro20/Documents/Datasets/ALIAS/Metadata"
+    metadata_dir <- "#"
     metadata_file <- file.path(metadata_dir,
                                "query_standard_cohort_2023-02-22.tsv.txt")
     metadata <- read.delim(metadata_file, stringsAsFactors = F)
@@ -81,7 +81,7 @@ if(T){
     metadata <- do.call(rbind.data.frame, metadata_list)
     
     #identifiers
-    patient_id <- substr(metadata$occams_id, 8, nchar(metadata$occams_id))
+    patient_id <- #
     patient_id <- gsub("/", "", patient_id)
     sha_id <- metadata$sha_id
     centre <- substr(patient_id, 1,2)
@@ -137,78 +137,7 @@ if(T){
     underwent_surgery <- metadata$ST_MainSurgery=="yes"
     
     #chemotherapy
-    chemotherapy_protocol <- metadata$TR_ChemotherapyTreatmentProtocol
-    chemotherapy_protocol[chemotherapy_protocol%in%c("ECX",
-                                                     "ECX (Neo Aegis trial)",
-                                                     "ECX 12HR",
-                                                     "ECX 1HR",
-                                                     "ECX:12HR",
-                                                     "STO3/ECX only"
-    )] <- "epirubicin, cisplatin, capecitabine"
-    chemotherapy_protocol[chemotherapy_protocol%in%c("ECX +- Bevacuzimab",
-                                                     "ECX (Neo Aegis trial)",
-                                                     "ECX +-avastin",
-                                                     "ECX + avastin",
-                                                     "ECX+Bevacizumab (STO3)",
-                                                     "ST03",
-                                                     "STO3(ECX or ECX&Bevacizumab)",
-                                                     "STO3/ECX only",
-                                                     "ST03 trial",
-                                                     "ST03")] <- "epirubicin, cisplatin, capecitabine +/- bevacizumab"
-    chemotherapy_protocol[chemotherapy_protocol%in%c("CROSS",
-                                                     "carboplatin +paclitaxel"
-    )] <- "carboplatin, paclitaxel"
-    chemotherapy_protocol[chemotherapy_protocol=="EOX"] <- "epirubicin, oxaliplatin, capecitabine"
-    chemotherapy_protocol[chemotherapy_protocol=="1xECX, 5x EOX"] <- "epirubicin, cisplatin, oxaliplatin, capecitabine"
-    chemotherapy_protocol[chemotherapy_protocol%in%c("ECarboX",
-                                                     " ECarboX",
-                                                     "E Carbo X")] <- "epirubicin, carboplatin, capecitabine"
-    chemotherapy_protocol[chemotherapy_protocol%in%c("CX")] <- "cisplatin, capecitabine"
-    chemotherapy_protocol[chemotherapy_protocol%in%c("ECF")] <- "epirubicin, cisplatin, 5-fluorouracil"
-    chemotherapy_protocol[chemotherapy_protocol%in%c("ECX after cycle 1 switched to ECF",
-                                                     "ECX (1x) ECF (2x)")] <- "epirubicin, cisplatin, capecitabine, 5-fluorouracil"
-    chemotherapy_protocol[chemotherapy_protocol%in%c("nil",
-                                                     "Nil",
-                                                     "Nil (no option to exclude)",
-                                                     "nill"
-    )] <- "unknown"
-    chemotherapy_protocol[chemotherapy_protocol%in%c("CarboX",
-                                                     "Carboplatin "
-    )] <- "carboplatin"
-    chemotherapy_protocol[chemotherapy_protocol %in% c("CIS/5-FU",
-                                                       "2Cisplatin/5FU",
-                                                       "CF",
-                                                       "Cis/5-FU",
-                                                       "Cisplatin + 5-FU",
-                                                       "Cisplatin/5'FU",
-                                                       "Cisplatin/5-FU",
-                                                       "Cisplatin/5FU",
-                                                       "C/5'FU ",
-                                                       "CIS/Capecitabine ",
-                                                       "Cisplatin/5 FU"
-    )] <- "cisplatin, 5-fluorouracil"
-    chemotherapy_protocol[chemotherapy_protocol %in% c("LEO",
-                                                       "LEO (XC&Lapatinib)",
-                                                       "Oxaliplatin, Capecitabine, Lapatinib(LEO)"
-                                                       
-    )] <- "lapatinib, capecitabine, oxaliplatin"
-    chemotherapy_protocol[chemotherapy_protocol %in% c("ECarboX")] <- "epirubicin, carboplatin, capecitabine"
-    chemotherapy_protocol[chemotherapy_protocol %in% c("Carboplatin")] <- "carboplatin"
-    chemotherapy_protocol[chemotherapy_protocol %in% c("Cisplatin/Capecitabine")] <- "cisplatin, capecitabine"
-    
-    chemotherapy_protocol[chemotherapy_protocol %in% c("O/5'FU")] <- "oxaliplatin, 5-fluorouracil"
-    chemotherapy_protocol[chemotherapy_protocol %in% c("Initially palliative - good response considered for curative surgery")] <- "other"
-    chemotherapy_protocol[chemotherapy_protocol %in% c("CX & Trastuzumab")] <- "cisplatin, capecitabine, trastuzumab"
-    chemotherapy_protocol[chemotherapy_protocol %in% c("")] <- "unknown"
-    chemotherapy_protocol2 <- chemotherapy_protocol
-    chemotherapy_protocol2[!chemotherapy_protocol2 %in% c("epirubicin, cisplatin, capecitabine",
-                                                          "cisplatin, 5-fluorouracil",
-                                                          "epirubicin, oxaliplatin, capecitabine",
-                                                          "none",
-                                                          "epirubicin, cisplatin, capecitabine +/- bevacizumab",
-                                                          "unknown"
-    )] <- "other"
-    chemotherapy_protocol <- chemotherapy_protocol2
+    #removed
     
     
     #pathological T stage
@@ -336,7 +265,7 @@ if(T){
   
   #import ct image acquisition parameters
   if(T){
-    acq_params_file <- 'C:/Users/ro20/Documents/PycharmProjects/ALIAS 11_10_21/acq_params/alias.csv'
+    acq_params_file <- '#'
     acq_params_df <- read.csv(acq_params_file)[,-1]
     acq_params_df <- acq_params_df[,!colnames(acq_params_df)=="slice_thickness"]
     acq_params_df$acq_study_date <- paste0(
@@ -348,7 +277,7 @@ if(T){
              7,8)
     )
     acq_params_df$acq_study_date <- as.Date(acq_params_df$acq_study_date, format="%Y-%m-%d")
-    truncation_df <- read.csv('C:/Users/ro20/Documents/PycharmProjects/ALIAS 11_10_21/tables/alias_truncation.csv')[,-1]
+    truncation_df <- read.csv('#')[,-1]
     acq_params_df <- merge.data.frame(acq_params_df, truncation_df, all.x = T, all.y = T)
     acq_params_df$truncation[is.na(acq_params_df$truncation)] <- F
     acq_params_df$dataset <- "ALIAS"
@@ -359,8 +288,8 @@ if(T){
   #import radiomic data
   if(T){
     
-    radiomic_df <- read.csv("C:/Users/ro20/Documents/Datasets/Radiomic_Features/radiomic_features_alias_SW_06_03_23/ALIAS_os.csv")[,-1]
-    radiomic_df <- radiomic_df[radiomic_df$patient_id!="NT331",]
+    radiomic_df <- read.csv("#")[,-1]
+    radiomic_df <- radiomic_df[radiomic_df$patient_id!="#",]
     radiomic_df$patients_with_corrupt_scan <- radiomic_df$patient_id %in% setdiff(acq_params_df$patient_id,
                                                                                   radiomic_df$patient_id)
     radioclinical_df$patients_without_scan1 <- !radioclinical_df$patient_id %in% radiomic_df$patient_id
@@ -379,7 +308,7 @@ if(T){
   #import enhancement scores
   if(T){
     es_df <-  read.csv(
-      "C:/Users/ro20/Documents/PycharmProjects/ALIAS 11_10_21/tables/enhancement_mean_df_08_06_23.csv",
+      "#",
       row.names = 1)
     radioclinical_df <- merge.data.frame(es_df, radioclinical_df)
     radioclinical_df[radioclinical_df$volume==0, c("ef", "esf")] <- 0
